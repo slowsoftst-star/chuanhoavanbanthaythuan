@@ -88,7 +88,10 @@ const Sidebar: React.FC = () => {
           <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center text-white shadow-lg">
             <i className="fas fa-file-shield text-xl"></i>
           </div>
-          <span className="font-bold text-slate-800 text-lg leading-tight">Văn Bản AI</span>
+          <div className="flex flex-col">
+            <span className="font-bold text-slate-800 text-lg leading-tight">Văn Bản AI</span>
+            <p className="signature-text text-xs">Được phát triển bởi thầy Trần Minh Thuận</p>
+          </div>
         </div>
       </div>
       <nav className="flex-1 p-4 space-y-2 overflow-y-auto custom-scrollbar">
@@ -110,11 +113,6 @@ const Sidebar: React.FC = () => {
           <i className="fas fa-cog w-5 text-center"></i>
           Cài đặt
         </Link>
-      </div>
-      <div className="px-4 pb-4 text-center">
-        <p className="signature-text text-sm">
-          Được phát triển bởi thầy Trần Minh Thuận
-        </p>
       </div>
     </div>
   );
