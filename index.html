@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hệ thống Chuẩn hóa Văn bản Hành chính AI</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@300;400;500;600;700&family=Dancing+Script:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Mammoth.js để đọc .docx -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+  <!-- docx.js để tạo .docx - sử dụng UMD build -->
+  <script src="https://unpkg.com/docx@9.0.2/build/index.umd.js"></script>
+  <!-- FileSaver.js để save file -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <script>
+    // Kiểm tra thư viện đã load - dùng để debug
+    window.checkDocxLibrary = function () {
+      const docxReady = typeof window.docx !== 'undefined';
+      const saveAsReady = typeof window.saveAs !== 'undefined';
+      console.log('docx library ready:', docxReady, window.docx);
+      console.log('saveAs library ready:', saveAsReady);
+      return docxReady && saveAsReady;
+    };
+    // Gọi check sau khi load xong
+    window.addEventListener('load', function () {
+      window.checkDocxLibrary();
+    });
+  </script>
+
+  <style>
+    body {
+      font-family: 'Be Vietnam Pro', sans-serif;
+      background-color: #f8fafc;
+    }
+
+    .gradient-primary {
+      background: linear-gradient(135deg, #4A90E2 0%, #FF9500 100%);
+    }
+
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #f1f1f1;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 10px;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+
+      to {
+        opacity: 1;
+      }
+    }
+
+    @keyframes slideUp {
+      from {
+        transform: translateY(20px);
+        opacity: 0;
+      }
+
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+
+    .animate-fade-in {
+      animation: fadeIn 0.5s ease-out;
+    }
+
+    .animate-slide-up {
+      animation: slideUp 0.5s ease-out;
+    }
+
+    .signature-text {
+      font-family: 'Dancing Script', cursive;
+      background: linear-gradient(135deg, #4A90E2, #FF9500, #E91E63);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      font-weight: 600;
+      animation: shimmer 3s ease-in-out infinite;
+    }
+
+    @keyframes shimmer {
+
+      0%,
+      100% {
+        opacity: 0.8;
+      }
+
+      50% {
+        opacity: 1;
+      }
+    }
+  </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.40.0",
+    "react-router-dom": "https://esm.sh/react-router-dom@^7.13.0",
+    "canvas-confetti": "https://esm.sh/canvas-confetti@^1.9.4"
+  }
+}
+</script>
+  <link rel="stylesheet" href="/index.css">
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+
+</html>

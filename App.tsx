@@ -1,0 +1,802 @@
+
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { HashRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
+import { DocType, DocCategory, AnalysisResult, AppNotification, HistoryItem } from './types';
+import { ND30_STANDARD, APP_CONFIG } from './constants';
+import { GeminiService } from './services/geminiService';
+import confetti from 'canvas-confetti';
+
+// Khai báo kiểu cho các thư viện cài qua CDN
+declare const mammoth: any;
+declare const docx: any;
+declare const saveAs: any;
+
+// --- Helpers for LocalStorage ---
+
+const getStoredHistory = (): HistoryItem[] => {
+  try {
+    const data = localStorage.getItem(APP_CONFIG.LS_DOCS);
+    return data ? JSON.parse(data) : [];
+  } catch (error) {
+    console.error("Error loading history", error);
+    return [];
+  }
+};
+
+const addHistoryItem = (item: HistoryItem) => {
+  try {
+    const history = getStoredHistory();
+    // Thêm vào đầu danh sách
+    const newHistory = [item, ...history];
+    // Giới hạn lưu trữ 50 item gần nhất để tránh đầy bộ nhớ
+    if (newHistory.length > 50) newHistory.pop();
+    localStorage.setItem(APP_CONFIG.LS_DOCS, JSON.stringify(newHistory));
+    return newHistory;
+  } catch (error) {
+    console.error("Error saving history", error);
+    return [];
+  }
+};
+
+const removeHistoryItem = (id: string) => {
+  try {
+    const history = getStoredHistory();
+    const newHistory = history.filter(item => item.id !== id);
+    localStorage.setItem(APP_CONFIG.LS_DOCS, JSON.stringify(newHistory));
+    return newHistory;
+  } catch (error) {
+    console.error("Error removing history item", error);
+    return [];
+  }
+};
+
+// --- Components ---
+
+const Toast: React.FC<{ notification: AppNotification | null, onClose: () => void }> = ({ notification, onClose }) => {
+  useEffect(() => {
+    if (notification) {
+      const timer = setTimeout(onClose, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [notification, onClose]);
+
+  if (!notification) return null;
+
+  const bgStyles = {
+    success: 'bg-green-500',
+    error: 'bg-red-500',
+    info: 'bg-blue-500',
+    warning: 'bg-yellow-500'
+  };
+
+  return (
+    <div className={`fixed bottom-4 right-4 z-50 p-4 rounded-lg shadow-xl text-white flex items-center gap-3 animate-slide-up ${bgStyles[notification.type]}`}>
+      <i className={`fas ${notification.type === 'success' ? 'fa-check-circle' : 'fa-info-circle'}`}></i>
+      <span>{notification.message}</span>
+    </div>
+  );
+};
+
+const Sidebar: React.FC = () => {
+  const location = useLocation();
+  const isActive = (path: string) => location.pathname === path;
+
+  return (
+    <div className="w-64 bg-white h-screen border-r border-slate-200 flex flex-col sticky top-0">
+      <div className="p-6 border-b border-slate-100">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center text-white shadow-lg">
+            <i className="fas fa-file-shield text-xl"></i>
+          </div>
+          <span className="font-bold text-slate-800 text-lg leading-tight">Văn Bản AI</span>
+        </div>
+      </div>
+      <nav className="flex-1 p-4 space-y-2 overflow-y-auto custom-scrollbar">
+        <Link to="/" className={`flex items-center gap-3 p-3 rounded-xl transition-all ${isActive('/') ? 'bg-blue-50 text-blue-600 font-medium' : 'text-slate-500 hover:bg-slate-50'}`}>
+          <i className="fas fa-chart-pie w-5 text-center"></i>
+          Tổng quan
+        </Link>
+        <Link to="/standardize" className={`flex items-center gap-3 p-3 rounded-xl transition-all ${isActive('/standardize') ? 'bg-blue-50 text-blue-600 font-medium' : 'text-slate-500 hover:bg-slate-50'}`}>
+          <i className="fas fa-magic w-5 text-center"></i>
+          Chuẩn hóa văn bản
+        </Link>
+        <Link to="/history" className={`flex items-center gap-3 p-3 rounded-xl transition-all ${isActive('/history') ? 'bg-blue-50 text-blue-600 font-medium' : 'text-slate-500 hover:bg-slate-50'}`}>
+          <i className="fas fa-history w-5 text-center"></i>
+          Lịch sử xử lý
+        </Link>
+      </nav>
+      <div className="p-4 border-t border-slate-100">
+        <Link to="/settings" className={`flex items-center gap-3 p-3 rounded-xl transition-all ${isActive('/settings') ? 'bg-slate-100 text-slate-800' : 'text-slate-500 hover:bg-slate-50'}`}>
+          <i className="fas fa-cog w-5 text-center"></i>
+          Cài đặt
+        </Link>
+      </div>
+      <div className="px-4 pb-4 text-center">
+        <p className="signature-text text-sm">
+          Được phát triển bởi thầy Trần Minh Thuận
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// --- Pages ---
+
+const Dashboard: React.FC = () => {
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+
+  useEffect(() => {
+    setHistory(getStoredHistory());
+  }, []);
+
+  // Calculate statistics
+  const totalDocs = history.length;
+  const avgScore = totalDocs > 0
+    ? Math.round(history.reduce((acc, item) => acc + item.score, 0) / totalDocs * 10) / 10
+    : 0;
+  // Giả sử mỗi văn bản tiết kiệm 30 phút
+  const timeSaved = Math.round((totalDocs * 30) / 60);
+
+  return (
+    <div className="space-y-8 animate-fade-in">
+      <div className="flex justify-between items-end">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Trình điều khiển thông minh</h1>
+          <p className="text-slate-500">Tối ưu hóa quy trình soạn thảo theo NĐ 30/2020/NĐ-CP.</p>
+        </div>
+        <Link to="/standardize" className="px-6 py-3 rounded-full gradient-primary text-white font-semibold shadow-lg hover:scale-105 transition-transform">
+          Xử lý văn bản mới <i className="fas fa-bolt ml-2"></i>
+        </Link>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {[
+          { label: 'Tổng văn bản đã xử lý', value: totalDocs, icon: 'fa-file-circle-check', color: 'text-blue-500', bg: 'bg-blue-50' },
+          { label: 'Độ chuẩn xác trung bình', value: `${avgScore}%`, icon: 'fa-gauge-high', color: 'text-emerald-500', bg: 'bg-emerald-50' },
+          { label: 'Thời gian đã tiết kiệm', value: `${timeSaved} giờ`, icon: 'fa-clock-rotate-left', color: 'text-amber-500', bg: 'bg-amber-50' },
+        ].map((stat, i) => (
+          <div key={i} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-5">
+            <div className={`w-14 h-14 rounded-2xl ${stat.bg} ${stat.color} flex items-center justify-center text-2xl shadow-sm`}>
+              <i className={`fas ${stat.icon}`}></i>
+            </div>
+            <div>
+              <p className="text-slate-500 text-sm font-medium">{stat.label}</p>
+              <p className="text-2xl font-bold text-slate-800">{stat.value}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+          <h2 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
+            <i className="fas fa-list-check text-blue-500"></i> Công việc gần đây
+          </h2>
+          {history.length === 0 ? (
+            <div className="text-center py-8 text-slate-400">
+              <i className="fas fa-inbox text-4xl mb-3"></i>
+              <p>Chưa có văn bản nào được xử lý</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {history.slice(0, 5).map((item) => (
+                <div key={item.id} className="flex items-center justify-between p-4 rounded-xl border border-transparent hover:border-slate-100 hover:bg-slate-50 transition-all">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center text-blue-600 border border-slate-100">
+                      <i className="fas fa-file-lines text-xl"></i>
+                    </div>
+                    <div>
+                      <p className="text-slate-800 font-bold truncate max-w-[200px]">{item.fileName}</p>
+                      <p className="text-xs text-slate-400 font-medium">{item.docType} • {new Date(item.timestamp).toLocaleDateString('vi-VN')}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-6">
+                    <div className="text-right hidden sm:block">
+                      <p className="text-xs text-slate-400 uppercase font-bold">Chuẩn hóa</p>
+                      <p className={`text-sm font-bold ${item.score >= 90 ? 'text-emerald-500' : 'text-amber-500'}`}>{item.score}%</p>
+                    </div>
+                    <span className={`text-xs px-3 py-1.5 rounded-lg font-bold ${item.status === 'Hoàn thành' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                      {item.status}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+          <h2 className="text-lg font-bold text-slate-800 mb-6">Mẹo chuẩn hóa</h2>
+          <div className="space-y-4">
+            <div className="p-4 rounded-xl bg-blue-50 border border-blue-100">
+              <p className="text-sm font-bold text-blue-800 mb-1">Căn lề chuẩn</p>
+              <p className="text-xs text-blue-600">Lề trái luôn phải là 30mm - 35mm để đóng file hồ sơ.</p>
+            </div>
+            <div className="p-4 rounded-xl bg-amber-50 border border-amber-100">
+              <p className="text-sm font-bold text-amber-800 mb-1">Chữ ký số</p>
+              <p className="text-xs text-amber-600">Hình ảnh chữ ký số phải là hình tròn, màu đỏ, kích thước chuẩn.</p>
+            </div>
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-100">
+              <p className="text-sm font-bold text-slate-800 mb-1">Tiêu ngữ</p>
+              <p className="text-xs text-slate-600">Luôn ghi hoa chữ cái đầu và có gạch ngang dài dưới Tiêu ngữ.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const Standardize: React.FC<{ onNotify: (n: AppNotification) => void }> = ({ onNotify }) => {
+  const [content, setContent] = useState('');
+  const [fileName, setFileName] = useState('');
+  const [docCategory, setDocCategory] = useState<DocCategory>(DocCategory.HANH_CHINH);
+  const [docType, setDocType] = useState<DocType>(DocType.CONG_VAN);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.endsWith('.docx')) {
+      onNotify({ id: Date.now().toString(), type: 'error', message: 'Hệ thống chỉ hỗ trợ file .docx' });
+      return;
+    }
+
+    setFileName(file.name);
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const arrayBuffer = e.target?.result as ArrayBuffer;
+      try {
+        const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+        setContent(result.value);
+        onNotify({ id: Date.now().toString(), type: 'success', message: 'Tải văn bản thành công!' });
+      } catch (err) {
+        onNotify({ id: Date.now().toString(), type: 'error', message: 'Không thể đọc nội dung file Word.' });
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleStandardize = async () => {
+    if (!content.trim()) {
+      onNotify({ id: Date.now().toString(), type: 'warning', message: 'Vui lòng nhập nội dung hoặc tải file lên.' });
+      return;
+    }
+
+    setIsProcessing(true);
+    setResult(null);
+    setPreviewHtml(null);
+
+    try {
+      const gemini = new GeminiService();
+      const analysis = await gemini.analyzeDocument(content, docType, docCategory);
+
+      // Clean content
+      if (analysis.standardizedContent) {
+        analysis.standardizedContent = analysis.standardizedContent
+          .replace(/```html/g, "")
+          .replace(/```/g, "")
+          .replace(/^.*Dưới đây là mã HTML.*$/gm, "")
+          .trim();
+      }
+
+      const preview = await gemini.generatePreviewHtml(analysis.standardizedContent || content);
+
+      setResult(analysis);
+      setPreviewHtml(preview);
+
+      // Save to History
+      const status = analysis.score >= 90 ? 'Hoàn thành' : 'Cần kiểm tra';
+      const newItem: HistoryItem = {
+        id: Date.now().toString(),
+        fileName: fileName || `VanBan_${new Date().toISOString().slice(0, 10)}.docx`,
+        timestamp: Date.now(),
+        docType: docType,
+        category: docCategory,
+        score: analysis.score,
+        status: status
+      };
+      addHistoryItem(newItem);
+
+      if (analysis.score >= 90) {
+        confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+        onNotify({ id: Date.now().toString(), type: 'success', message: 'Văn bản đã được chuẩn hóa thành công!' });
+      } else {
+        onNotify({ id: Date.now().toString(), type: 'info', message: 'Phân tích hoàn tất. Có một số điểm cần lưu ý.' });
+      }
+    } catch (err: any) {
+      onNotify({ id: Date.now().toString(), type: 'error', message: err.message });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleDownloadWord = async () => {
+    if (!result || !result.standardizedContent) {
+      onNotify({ id: Date.now().toString(), type: 'warning', message: 'Chưa có nội dung chuẩn hóa để tải về.' });
+      return;
+    }
+
+    // Hàm chờ thư viện sẵn sàng với retry
+    const waitForLibraries = (maxAttempts = 10): Promise<boolean> => {
+      return new Promise((resolve) => {
+        let attempts = 0;
+        const check = () => {
+          const docxLib = (window as any).docx;
+          const saveAsLib = (window as any).saveAs;
+          if (docxLib && saveAsLib) {
+            resolve(true);
+          } else if (attempts < maxAttempts) {
+            attempts++;
+            setTimeout(check, 200);
+          } else {
+            resolve(false);
+          }
+        };
+        check();
+      });
+    };
+
+    // Chờ thư viện load
+    const librariesReady = await waitForLibraries();
+    if (!librariesReady) {
+      onNotify({ id: Date.now().toString(), type: 'error', message: 'Thư viện xuất file chưa sẵn sàng. Vui lòng tải lại trang và thử lại.' });
+      return;
+    }
+
+    try {
+      const docxLib = (window as any).docx;
+      const saveAsLib = (window as any).saveAs;
+      const { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel } = docxLib;
+
+      const cleanContent = result.standardizedContent || "";
+      const lines = cleanContent.split('\n');
+
+      // Tạo paragraphs với định dạng theo NĐ30
+      const paragraphs = lines.map((line: string, index: number) => {
+        const trimmedLine = line.trim();
+
+        if (trimmedLine === '') {
+          return new Paragraph({
+            children: [],
+            spacing: { line: 276 } // 1.15 line spacing
+          });
+        }
+
+        // Detect tiêu đề (thường là dòng đầu tiên hoặc dòng ngắn IN HOA)
+        const isTitle = index < 3 && trimmedLine === trimmedLine.toUpperCase() && trimmedLine.length < 100;
+        const isHeader = trimmedLine.toUpperCase() === trimmedLine && trimmedLine.length < 60 && index > 2;
+
+        if (isTitle) {
+          return new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [
+              new TextRun({
+                text: trimmedLine,
+                font: "Times New Roman",
+                size: 28, // 14pt
+                bold: true,
+              }),
+            ],
+            spacing: { line: 360, before: 120, after: 120 },
+          });
+        }
+
+        if (isHeader) {
+          return new Paragraph({
+            children: [
+              new TextRun({
+                text: trimmedLine,
+                font: "Times New Roman",
+                size: 28,
+                bold: true,
+              }),
+            ],
+            spacing: { line: 360, before: 200, after: 100 },
+          });
+        }
+
+        // Paragraph thường
+        return new Paragraph({
+          children: [
+            new TextRun({
+              text: trimmedLine,
+              font: "Times New Roman",
+              size: 28, // 14pt = 28 half-points
+            }),
+          ],
+          spacing: { line: 360, before: 60, after: 60 }, // 1.5 line spacing
+        });
+      });
+
+      const doc = new Document({
+        styles: {
+          default: {
+            document: {
+              run: {
+                font: "Times New Roman",
+                size: 28, // 14pt
+              },
+            },
+          },
+        },
+        sections: [{
+          properties: {
+            page: {
+              margin: {
+                top: 1134,   // ~20mm (1mm = 56.69 twips)
+                bottom: 1134,
+                left: 1701,  // ~30mm
+                right: 850,  // ~15mm
+              }
+            }
+          },
+          children: paragraphs,
+        }],
+      });
+
+      const blob = await Packer.toBlob(doc);
+      const outputFileName = fileName ? `ChuanHoa_${fileName}` : "VanBan_ChuanHoa.docx";
+      saveAsLib(blob, outputFileName);
+      onNotify({ id: Date.now().toString(), type: 'success', message: `Đã tải xuống file "${outputFileName}" thành công!` });
+
+    } catch (error: any) {
+      console.error("Download Word error:", error);
+      onNotify({ id: Date.now().toString(), type: 'error', message: 'Lỗi khi tạo file Word: ' + (error.message || 'Unknown error') });
+    }
+  };
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold text-slate-800">Công cụ chuẩn hóa</h1>
+        <div className="flex gap-2">
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+            accept=".docx"
+            className="hidden"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="px-5 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition-all font-semibold flex items-center gap-2 shadow-sm"
+          >
+            <i className="fas fa-file-word text-blue-500"></i> Upload file VB cần chuẩn hóa
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="space-y-4">
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">Danh mục văn bản</label>
+                <select
+                  className="w-full p-3.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none font-medium bg-slate-50 transition-all"
+                  value={docCategory}
+                  onChange={(e) => setDocCategory(e.target.value as DocCategory)}
+                >
+                  {Object.values(DocCategory).map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">Loại văn bản mục tiêu</label>
+                <select
+                  className="w-full p-3.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none font-medium bg-slate-50 transition-all"
+                  value={docType}
+                  onChange={(e) => setDocType(e.target.value as DocType)}
+                >
+                  {Object.values(DocType).map(type => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-2">Nội dung văn bản gốc</label>
+              <textarea
+                className="w-full h-[500px] p-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none resize-none font-mono text-sm custom-scrollbar bg-slate-50 transition-all"
+                placeholder="Dán nội dung hoặc tải tệp lên để bắt đầu phân tích..."
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+              ></textarea>
+            </div>
+            <button
+              onClick={handleStandardize}
+              disabled={isProcessing}
+              className={`w-full py-4 rounded-xl text-white font-bold shadow-xl transition-all flex items-center justify-center gap-3 ${isProcessing ? 'bg-slate-400 cursor-not-allowed' : 'gradient-primary hover:brightness-110 active:scale-[0.98]'}`}
+            >
+              {isProcessing ? (
+                <><i className="fas fa-spinner fa-spin"></i> Trí tuệ nhân tạo đang phân tích...</>
+              ) : (
+                <><i className="fas fa-wand-magic-sparkles"></i> Chuẩn hóa toàn diện</>
+              )}
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          {result ? (
+            <div className="space-y-6 animate-slide-up">
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                <div className="flex justify-between items-center mb-6">
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-800">Kết quả đánh giá</h2>
+                    <p className="text-xs text-slate-400 font-medium">So sánh với quy định: {docCategory === DocCategory.HANH_CHINH ? 'NĐ 30/2020' : 'QĐ 399'}</p>
+                  </div>
+                  <div className={`w-14 h-14 rounded-full flex items-center justify-center font-bold text-lg border-4 shadow-sm ${result.score >= 80 ? 'border-emerald-500 text-emerald-600' : result.score >= 50 ? 'border-amber-500 text-amber-600' : 'border-red-500 text-red-600'}`}>
+                    {result.score}%
+                  </div>
+                </div>
+
+                <div className="space-y-5">
+                  <div>
+                    <h3 className="text-xs font-bold text-red-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+                      <i className="fas fa-circle-exclamation"></i> Lỗi cần sửa ({result.issues.length})
+                    </h3>
+                    <ul className="space-y-2.5">
+                      {result.issues.map((issue, idx) => (
+                        <li key={idx} className="text-sm text-slate-700 flex items-start gap-3 p-3 bg-red-50 rounded-xl">
+                          <i className="fas fa-circle-xmark mt-1 text-red-400"></i>
+                          <span>{issue}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div>
+                    <h3 className="text-xs font-bold text-blue-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+                      <i className="fas fa-wand-magic"></i> AI Đề xuất
+                    </h3>
+                    <ul className="space-y-2.5">
+                      {result.suggestions.map((suggestion, idx) => (
+                        <li key={idx} className="text-sm text-slate-700 flex items-start gap-3 p-3 bg-blue-50 rounded-xl">
+                          <i className="fas fa-sparkles mt-1 text-blue-400"></i>
+                          <span>{suggestion}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="text-lg font-bold text-slate-800">Bản thảo chuẩn hóa</h2>
+                  <button
+                    onClick={handleDownloadWord}
+                    className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-bold text-sm hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-sm active:scale-95"
+                  >
+                    <i className="fas fa-download"></i> Tải tệp .docx
+                  </button>
+                </div>
+                <div
+                  className="bg-slate-50 p-8 rounded-xl border border-slate-200 min-h-[400px] text-slate-800 shadow-inner overflow-y-auto font-serif"
+                  style={{ lineHeight: '1.5' }}
+                  dangerouslySetInnerHTML={{ __html: previewHtml || '' }}
+                ></div>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-white p-12 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-center space-y-6 h-full min-h-[600px]">
+              <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center text-slate-300 text-4xl shadow-inner">
+                <i className="fas fa-magnifying-glass-chart"></i>
+              </div>
+              <div className="space-y-2">
+                <p className="text-slate-800 font-bold text-xl">Sẵn sàng phân tích</p>
+                <p className="text-slate-400 text-sm max-w-sm mx-auto">Vui lòng tải tệp Word hoặc dán nội dung văn bản vào khung bên trái để bắt đầu quá trình kiểm tra tự động.</p>
+              </div>
+              <div className="flex gap-4">
+                <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
+                  <i className="fas fa-check text-emerald-400"></i> Đúng Nghị định 30/QĐ 399
+                </div>
+                <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
+                  <i className="fas fa-check text-emerald-400"></i> Sửa lỗi tự động
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const Settings: React.FC<{ onNotify: (n: AppNotification) => void }> = ({ onNotify }) => {
+  const handleOpenKeySelector = async () => {
+    try {
+      await (window as any).aistudio.openSelectKey();
+      onNotify({ id: Date.now().toString(), type: 'success', message: 'Cấu hình API Key thành công!' });
+    } catch (err) {
+      console.error(err);
+      onNotify({ id: Date.now().toString(), type: 'error', message: 'Không thể mở trình chọn API Key.' });
+    }
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-8 animate-fade-in">
+      <div className="flex items-center gap-3">
+        <i className="fas fa-user-gear text-blue-600 text-3xl"></i>
+        <h1 className="text-2xl font-bold text-slate-800">Thiết lập hệ thống</h1>
+      </div>
+
+      <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-100 space-y-8">
+        <div>
+          <label className="block text-sm font-bold text-slate-700 mb-3">Google Gemini API Key</label>
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Ứng dụng yêu cầu API Key từ dự án Google Cloud có bật thanh toán để hoạt động. Vui lòng chọn một API Key hợp lệ thông qua hệ thống AI Studio.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={handleOpenKeySelector}
+                className="px-8 py-3 rounded-2xl gradient-primary text-white font-bold shadow-lg hover:brightness-110 active:scale-95 transition-all flex items-center gap-2"
+              >
+                <i className="fas fa-key"></i> Chọn hoặc Cập nhật API Key
+              </button>
+              <a
+                href="https://ai.google.dev/gemini-api/docs/billing"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-6 py-3 rounded-2xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 transition-all flex items-center gap-2"
+              >
+                <i className="fas fa-file-invoice-dollar"></i> Tài liệu Billing
+              </a>
+            </div>
+          </div>
+          <p className="mt-4 text-xs text-slate-400 flex items-center gap-2 italic">
+            <i className="fas fa-shield-halved"></i> Khóa API được bảo mật và không lưu trữ thủ công trong mã nguồn ứng dụng.
+          </p>
+        </div>
+
+        <div className="pt-8 border-t border-slate-100">
+          <h2 className="text-lg font-bold text-slate-800 mb-6">Tham số chuẩn hóa (Default)</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-blue-200 transition-all">
+              <p className="text-xs font-bold text-slate-500 uppercase mb-2">Lề trái bắt buộc</p>
+              <div className="flex items-center gap-2">
+                <input type="number" defaultValue={30} className="bg-transparent font-bold text-blue-600 outline-none text-xl w-16" />
+                <span className="text-slate-400 font-bold">mm</span>
+              </div>
+            </div>
+            <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-blue-200 transition-all">
+              <p className="text-xs font-bold text-slate-500 uppercase mb-2">Font chữ mặc định</p>
+              <select className="w-full bg-transparent font-bold text-blue-600 outline-none text-lg cursor-pointer">
+                <option>Times New Roman</option>
+                <option>Arial</option>
+                <option>Be Vietnam Pro</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-5 bg-blue-50 rounded-2xl border border-blue-100 flex items-start gap-4">
+          <i className="fas fa-info-circle text-blue-500 mt-1"></i>
+          <div>
+            <p className="text-sm font-bold text-blue-900">Thông tin bổ sung</p>
+            <p className="text-xs text-blue-700 leading-relaxed">Đảm bảo tài khoản Google của bạn có đủ hạn ngạch (quota) để thực hiện các yêu cầu phân tích văn bản lớn.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const History: React.FC = () => {
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+
+  useEffect(() => {
+    setHistory(getStoredHistory());
+  }, []);
+
+  const handleDelete = (id: string) => {
+    if (confirm('Bạn có chắc muốn xóa lịch sử này?')) {
+      const newHistory = removeHistoryItem(id);
+      setHistory(newHistory);
+    }
+  };
+
+  return (
+    <div className="animate-fade-in space-y-6">
+      <h1 className="text-2xl font-bold text-slate-800">Lịch sử xử lý văn bản</h1>
+      <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden shadow-sm">
+        {history.length === 0 ? (
+          <div className="p-12 text-center text-slate-400">
+            <i className="fas fa-history text-4xl mb-4"></i>
+            <p>Chưa có dữ liệu lịch sử</p>
+          </div>
+        ) : (
+          <table className="w-full text-left">
+            <thead className="bg-slate-50 border-b border-slate-100 text-slate-400 text-xs font-bold uppercase tracking-widest">
+              <tr>
+                <th className="p-5">Văn bản</th>
+                <th className="p-5">Thời gian</th>
+                <th className="p-5">Loại văn bản</th>
+                <th className="p-5">Chất lượng</th>
+                <th className="p-5 text-right">Hành động</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50 text-slate-700">
+              {history.map((item) => (
+                <tr key={item.id} className="hover:bg-slate-50 transition-colors group">
+                  <td className="p-5">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center text-blue-500 group-hover:bg-blue-500 group-hover:text-white transition-all">
+                        <i className="fas fa-file-word"></i>
+                      </div>
+                      <span className="font-bold truncate max-w-[200px]">{item.fileName}</span>
+                    </div>
+                  </td>
+                  <td className="p-5 text-sm text-slate-500">{new Date(item.timestamp).toLocaleString('vi-VN')}</td>
+                  <td className="p-5 text-sm font-medium">{item.docType}</td>
+                  <td className="p-5">
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 max-w-[100px] bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                        <div className={`h-full ${item.score >= 80 ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${item.score}%` }}></div>
+                      </div>
+                      <span className={`text-xs font-bold ${item.score >= 80 ? 'text-emerald-600' : 'text-amber-600'}`}>{item.score}%</span>
+                    </div>
+                  </td>
+                  <td className="p-5 text-right">
+                    <button
+                      onClick={() => handleDelete(item.id)}
+                      className="w-9 h-9 rounded-lg border border-slate-100 inline-flex items-center justify-center text-slate-400 hover:text-red-500 hover:border-red-100 hover:bg-white transition-all"
+                      title="Xóa lịch sử"
+                    >
+                      <i className="fas fa-trash"></i>
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// --- Main Layout ---
+
+const MainLayout: React.FC = () => {
+  const [notification, setNotification] = useState<AppNotification | null>(null);
+
+  const notify = useCallback((n: AppNotification) => {
+    setNotification(n);
+  }, []);
+
+  return (
+    <div className="flex min-h-screen bg-slate-50">
+      <Sidebar />
+      <main className="flex-1 p-8 overflow-y-auto">
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/standardize" element={<Standardize onNotify={notify} />} />
+          <Route path="/history" element={<History />} />
+          <Route path="/settings" element={<Settings onNotify={notify} />} />
+        </Routes>
+      </main>
+      <Toast notification={notification} onClose={() => setNotification(null)} />
+    </div>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <Router>
+      <MainLayout />
+    </Router>
+  );
+};
+
+export default App;
