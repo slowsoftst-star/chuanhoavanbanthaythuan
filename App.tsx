@@ -318,7 +318,7 @@ const Standardize: React.FC<{ onNotify: (n: AppNotification) => void }> = ({ onN
   };
 
   const handleDownloadWord = async () => {
-    if (!result || !result.standardizedContent) {
+    if (!previewHtml) {
       onNotify({ id: Date.now().toString(), type: 'warning', message: 'Chưa có nội dung chuẩn hóa để tải về.' });
       return;
     }
@@ -353,69 +353,198 @@ const Standardize: React.FC<{ onNotify: (n: AppNotification) => void }> = ({ onN
     try {
       const docxLib = (window as any).docx;
       const saveAsLib = (window as any).saveAs;
-      const { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel } = docxLib;
+      const { Document, Packer, Paragraph, TextRun, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle } = docxLib;
 
-      const cleanContent = result.standardizedContent || "";
-      const lines = cleanContent.split('\n');
+      // Parse HTML để lấy cấu trúc
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(previewHtml, 'text/html');
+      const container = doc.body.firstElementChild || doc.body;
 
-      // Tạo paragraphs với định dạng theo NĐ30
-      const paragraphs = lines.map((line: string, index: number) => {
-        const trimmedLine = line.trim();
-
-        if (trimmedLine === '') {
-          return new Paragraph({
-            children: [],
-            spacing: { line: 276 } // 1.15 line spacing
-          });
+      // Hàm helper để lấy alignment từ style
+      const getAlignment = (el: Element): any => {
+        const style = el.getAttribute('style') || '';
+        if (style.includes('text-align: center') || style.includes('text-align:center')) {
+          return AlignmentType.CENTER;
         }
+        if (style.includes('text-align: right') || style.includes('text-align:right')) {
+          return AlignmentType.RIGHT;
+        }
+        if (style.includes('text-align: justify') || style.includes('text-align:justify')) {
+          return AlignmentType.JUSTIFIED;
+        }
+        return AlignmentType.LEFT;
+      };
 
-        // Detect tiêu đề (thường là dòng đầu tiên hoặc dòng ngắn IN HOA)
-        const isTitle = index < 3 && trimmedLine === trimmedLine.toUpperCase() && trimmedLine.length < 100;
-        const isHeader = trimmedLine.toUpperCase() === trimmedLine && trimmedLine.length < 60 && index > 2;
+      // Hàm helper để check bold/italic
+      const isBold = (el: Element): boolean => {
+        const style = el.getAttribute('style') || '';
+        const tagName = el.tagName.toLowerCase();
+        return style.includes('font-weight: bold') || style.includes('font-weight:bold') ||
+          style.includes('font-weight: 700') || style.includes('font-weight:700') ||
+          tagName === 'b' || tagName === 'strong';
+      };
 
-        if (isTitle) {
-          return new Paragraph({
-            alignment: AlignmentType.CENTER,
-            children: [
-              new TextRun({
-                text: trimmedLine,
+      const isItalic = (el: Element): boolean => {
+        const style = el.getAttribute('style') || '';
+        const tagName = el.tagName.toLowerCase();
+        return style.includes('font-style: italic') || style.includes('font-style:italic') ||
+          tagName === 'i' || tagName === 'em';
+      };
+
+      // Hàm helper để lấy font size từ style (convert px to half-points)
+      const getFontSize = (el: Element): number => {
+        const style = el.getAttribute('style') || '';
+        const match = style.match(/font-size:\s*(\d+)px/);
+        if (match) {
+          const px = parseInt(match[1]);
+          // Convert px to half-points (1pt = 2 half-points, 1px ≈ 0.75pt)
+          return Math.round(px * 0.75 * 2);
+        }
+        return 28; // Default 14pt
+      };
+
+      // Hàm recursive để parse element và tạo TextRuns
+      const parseTextContent = (el: Element): any[] => {
+        const runs: any[] = [];
+
+        el.childNodes.forEach((node) => {
+          if (node.nodeType === Node.TEXT_NODE) {
+            const text = node.textContent || '';
+            if (text.trim()) {
+              runs.push(new TextRun({
+                text: text,
                 font: "Times New Roman",
-                size: 28, // 14pt
-                bold: true,
-              }),
-            ],
-            spacing: { line: 360, before: 120, after: 120 },
-          });
-        }
+                size: getFontSize(el),
+                bold: isBold(el),
+                italics: isItalic(el),
+              }));
+            }
+          } else if (node.nodeType === Node.ELEMENT_NODE) {
+            const childEl = node as Element;
+            const childRuns = parseTextContent(childEl);
 
-        if (isHeader) {
-          return new Paragraph({
-            children: [
-              new TextRun({
-                text: trimmedLine,
-                font: "Times New Roman",
-                size: 28,
-                bold: true,
-              }),
-            ],
-            spacing: { line: 360, before: 200, after: 100 },
-          });
-        }
+            // Apply parent's styling to child runs if needed
+            childRuns.forEach(run => {
+              if (isBold(childEl) && run.properties) {
+                run.properties.bold = true;
+              }
+              if (isItalic(childEl) && run.properties) {
+                run.properties.italics = true;
+              }
+            });
 
-        // Paragraph thường
-        return new Paragraph({
-          children: [
-            new TextRun({
-              text: trimmedLine,
-              font: "Times New Roman",
-              size: 28, // 14pt = 28 half-points
-            }),
-          ],
-          spacing: { line: 360, before: 60, after: 60 }, // 1.5 line spacing
+            runs.push(...childRuns);
+          }
         });
-      });
 
-      const doc = new Document({
+        return runs;
+      };
+
+      // Tạo paragraphs từ HTML elements
+      const paragraphs: any[] = [];
+
+      const processElement = (el: Element) => {
+        const tagName = el.tagName.toLowerCase();
+
+        // Skip script/style tags
+        if (tagName === 'script' || tagName === 'style') return;
+
+        // Check if element has table
+        if (tagName === 'table') {
+          // Process table separately
+          const rows: any[] = [];
+          el.querySelectorAll('tr').forEach((tr) => {
+            const cells: any[] = [];
+            tr.querySelectorAll('td, th').forEach((cell) => {
+              const cellParagraphs: any[] = [];
+              const textRuns = parseTextContent(cell);
+              if (textRuns.length > 0) {
+                cellParagraphs.push(new Paragraph({
+                  alignment: getAlignment(cell),
+                  children: textRuns,
+                }));
+              }
+              cells.push(new TableCell({
+                children: cellParagraphs.length > 0 ? cellParagraphs : [new Paragraph({ children: [] })],
+                width: { size: 50, type: WidthType.PERCENTAGE },
+              }));
+            });
+            if (cells.length > 0) {
+              rows.push(new TableRow({ children: cells }));
+            }
+          });
+          if (rows.length > 0) {
+            paragraphs.push(new Table({
+              rows: rows,
+              width: { size: 100, type: WidthType.PERCENTAGE },
+            }));
+          }
+          return;
+        }
+
+        // Process div/p/span as paragraphs
+        if (tagName === 'div' || tagName === 'p' || tagName === 'h1' || tagName === 'h2' || tagName === 'h3') {
+          // Check if has child divs/p (nested structure)
+          const hasBlockChildren = el.querySelector('div, p, table');
+
+          if (hasBlockChildren) {
+            // Process children recursively
+            Array.from(el.children).forEach(child => processElement(child));
+          } else {
+            // Create paragraph from this element
+            const textRuns = parseTextContent(el);
+            if (textRuns.length > 0 || el.textContent?.trim()) {
+              paragraphs.push(new Paragraph({
+                alignment: getAlignment(el),
+                children: textRuns.length > 0 ? textRuns : [
+                  new TextRun({
+                    text: el.textContent?.trim() || '',
+                    font: "Times New Roman",
+                    size: getFontSize(el),
+                    bold: isBold(el),
+                  })
+                ],
+                spacing: { line: 360, before: 60, after: 60 },
+              }));
+            }
+          }
+          return;
+        }
+
+        // For other elements, process children
+        Array.from(el.children).forEach(child => processElement(child));
+      };
+
+      // Process the container
+      processElement(container);
+
+      // If no paragraphs were created, fall back to plain text
+      if (paragraphs.length === 0) {
+        const cleanContent = result?.standardizedContent || previewHtml.replace(/<[^>]*>/g, '\n');
+        const lines = cleanContent.split('\n').filter((l: string) => l.trim());
+
+        lines.forEach((line: string) => {
+          const trimmed = line.trim();
+          if (trimmed) {
+            const isUpperCase = trimmed === trimmed.toUpperCase() && trimmed.length < 100;
+            paragraphs.push(new Paragraph({
+              alignment: isUpperCase ? AlignmentType.CENTER : AlignmentType.LEFT,
+              children: [
+                new TextRun({
+                  text: trimmed,
+                  font: "Times New Roman",
+                  size: 28,
+                  bold: isUpperCase,
+                })
+              ],
+              spacing: { line: 360, before: 60, after: 60 },
+            }));
+          }
+        });
+      }
+
+      // Tạo document với định dạng NĐ30
+      const wordDoc = new Document({
         styles: {
           default: {
             document: {
@@ -430,10 +559,14 @@ const Standardize: React.FC<{ onNotify: (n: AppNotification) => void }> = ({ onN
           properties: {
             page: {
               margin: {
-                top: 1134,   // ~20mm (1mm = 56.69 twips)
-                bottom: 1134,
-                left: 1701,  // ~30mm
-                right: 850,  // ~15mm
+                top: 1134,    // 20mm
+                bottom: 1134, // 20mm
+                left: 1701,   // 30mm
+                right: 850,   // 15mm
+              },
+              size: {
+                width: 11906, // A4 width in twips
+                height: 16838, // A4 height in twips
               }
             }
           },
@@ -441,7 +574,7 @@ const Standardize: React.FC<{ onNotify: (n: AppNotification) => void }> = ({ onN
         }],
       });
 
-      const blob = await Packer.toBlob(doc);
+      const blob = await Packer.toBlob(wordDoc);
       const outputFileName = fileName ? `ChuanHoa_${fileName}` : "VanBan_ChuanHoa.docx";
       saveAsLib(blob, outputFileName);
       onNotify({ id: Date.now().toString(), type: 'success', message: `Đã tải xuống file "${outputFileName}" thành công!` });
