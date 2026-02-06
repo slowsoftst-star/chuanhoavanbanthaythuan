@@ -77,20 +77,50 @@ export class GeminiService {
    * Sử dụng gemini-3-pro-preview (mặc định) với fallback tự động.
    */
   async analyzeDocument(content: string, docType: string, docCategory: string): Promise<AnalysisResult> {
-    const prompt = `Bạn là chuyên gia về thể thức văn bản hành chính Việt Nam. Hãy phân tích văn bản sau đây dựa trên các quy định hiện hành.
+    // Xác định căn cứ pháp lý dựa trên danh mục văn bản
+    let legalBasis = '';
+    if (docCategory === 'Văn bản công tác Đảng') {
+      legalBasis = `
+CĂN CỨ PHÁP LÝ ÁP DỤNG:
+1. Quy định 399-QĐ/TW ngày 09/01/2026 về thể loại, thẩm quyền ban hành và thể thức văn bản của Đảng (do Ban Chấp hành Trung ương ban hành)
+2. Hướng dẫn 36-HD/VPTW ngày 03/04/2018 về thể thức và kỹ thuật trình bày văn bản của Đảng (do Văn phòng Ban Chấp hành Trung ương ban hành)
+
+YÊU CẦU CHUẨN HÓA THEO QUY ĐỊNH 399 VÀ HƯỚNG DẪN 36:
+- Tiêu đề văn bản: ĐẢNG CỘNG SẢN VIỆT NAM (font Times New Roman, cỡ 15-16, in hoa, đậm, căn giữa)
+- Tên cơ quan ban hành: Đặt phía trên trái, in hoa, đậm
+- Số và ký hiệu: Theo mẫu [số]-[ký hiệu viết tắt loại văn bản]/[viết tắt tên cơ quan]
+- Địa điểm và ngày tháng: Đặt phía dưới tiêu đề, căn phải, nghiêng
+- Trích yếu nội dung: Đặt dưới số và ký hiệu, căn giữa, in đậm
+- Nội dung: Font Times New Roman, cỡ 14, dãn dòng 1.5
+- Lề trái 30mm, lề phải 15mm, lề trên 20mm, lề dưới 20mm`;
+    } else {
+      legalBasis = `
+CĂN CỨ PHÁP LÝ ÁP DỤNG:
+Nghị định 30/2020/NĐ-CP ngày 05/03/2020 về công tác văn thư (do Chính phủ ban hành)
+
+YÊU CẦU CHUẨN HÓA THEO NGHỊ ĐỊNH 30:
+- Quốc hiệu: CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM (in hoa, đậm, cỡ 12-13)
+- Tiêu ngữ: Độc lập - Tự do - Hạnh phúc (cỡ 13-14, gạch nối ở giữa)
+- Tên cơ quan ban hành: Đặt phía trên trái, in hoa
+- Số và ký hiệu: Theo mẫu [số]/[viết tắt loại văn bản]-[viết tắt tên cơ quan]
+- Địa danh và ngày tháng: Đặt phía dưới Tiêu ngữ, căn phải, nghiêng
+- Tên loại và trích yếu: Căn giữa, in hoa đậm
+- Nội dung: Font Times New Roman, cỡ 14, dãn dòng 1.5
+- Lề trái 30mm, lề phải 15mm, lề trên 20mm, lề dưới 20mm`;
+    }
+
+    const prompt = `Bạn là chuyên gia về thể thức văn bản hành chính Việt Nam. Hãy phân tích và chuẩn hóa văn bản sau đây.
 
 Danh mục văn bản: ${docCategory}
 Loại văn bản mục tiêu: ${docType}
-
-Quy tắc áp dụng:
-- Nếu là Văn bản hành chính: Áp dụng Nghị định 30/2020/NĐ-CP.
-- Nếu là Văn bản công tác Đảng: Áp dụng Quy định 399-QĐ/TW.
+${legalBasis}
 
 Yêu cầu cực kỳ quan trọng cho trường 'standardizedContent':
-- CHỈ chứa nội dung văn bản thuần túy (Plain Text) đã được chuẩn hóa.
+- CHỈ chứa nội dung văn bản thuần túy (Plain Text) đã được chuẩn hóa đúng theo quy định nêu trên.
 - TUYỆT ĐỐI KHÔNG bao gồm các ký tự Markdown như \`\`\`html hoặc \`\`\`.
 - KHÔNG bao gồm lời dẫn giải ("Dưới đây là...", "Sau đây là...").
 - Giữ nguyên cấu trúc xuống dòng để tạo các đoạn văn bản.
+- Sửa các lỗi về thể thức, định dạng, trình bày theo đúng quy định áp dụng.
 
 Nội dung cần phân tích: 
 ---
@@ -153,8 +183,37 @@ ${content}
    * Tạo bản xem trước HTML mô phỏng văn bản thực tế.
    * Sử dụng model hiện tại hoặc fallback.
    */
-  async generatePreviewHtml(content: string): Promise<string> {
-    const prompt = `Hãy chuyển đổi nội dung văn bản hành chính sau thành mã HTML mô phỏng trang giấy A4 (chỉ trả về một thẻ <div> duy nhất bao ngoài, KHÔNG có \`\`\`html hay các ký tự markdown khác). Sử dụng CSS inline để định dạng đúng vị trí: Quốc hiệu tiêu ngữ bên phải, Cơ quan ban hành bên trái, Tên loại văn bản ở giữa... theo Nghị định 30/2020/NĐ-CP hoặc Quy định 399 tùy ngữ cảnh:
+  async generatePreviewHtml(content: string, docCategory: string = 'Văn bản hành chính'): Promise<string> {
+    // Xác định căn cứ pháp lý dựa trên danh mục văn bản
+    let formatGuide = '';
+    if (docCategory === 'Văn bản công tác Đảng') {
+      formatGuide = `
+Áp dụng theo Quy định 399-QĐ/TW và Hướng dẫn 36-HD/VPTW:
+- Tiêu đề: "ĐẢNG CỘNG SẢN VIỆT NAM" căn giữa, in hoa, đậm
+- Tên cơ quan ban hành bên trái, in hoa, đậm
+- Số và ký hiệu theo mẫu: [số]-[ký hiệu văn bản]/[cơ quan]
+- Địa điểm và ngày tháng bên phải, in nghiêng`;
+    } else {
+      formatGuide = `
+Áp dụng theo Nghị định 30/2020/NĐ-CP:
+- Quốc hiệu bên phải: "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM" in hoa, đậm
+- Tiêu ngữ: "Độc lập - Tự do - Hạnh phúc" có gạch ngang ở giữa
+- Tên cơ quan ban hành bên trái, in hoa
+- Số và ký hiệu theo mẫu: [số]/[loại văn bản]-[cơ quan]
+- Địa danh và ngày tháng bên phải, in nghiêng`;
+    }
+
+    const prompt = `Hãy chuyển đổi nội dung văn bản sau thành mã HTML mô phỏng trang giấy A4.
+${formatGuide}
+
+QUAN TRỌNG:
+- Chỉ trả về một thẻ <div> duy nhất bao ngoài
+- KHÔNG có \`\`\`html hay các ký tự markdown khác
+- Sử dụng CSS inline để định dạng đúng vị trí các thành phần
+- Font: Times New Roman, cỡ 14pt
+- Lề: trái 30mm, phải 15mm, trên/dưới 20mm
+
+Nội dung văn bản:
 ${content}`;
 
     try {
