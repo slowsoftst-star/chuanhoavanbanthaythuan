@@ -613,81 +613,169 @@ const Standardize: React.FC<{ onNotify: (n: AppNotification) => void }> = ({ onN
 };
 
 const Settings: React.FC<{ onNotify: (n: AppNotification) => void }> = ({ onNotify }) => {
-  const handleOpenKeySelector = async () => {
-    try {
-      await (window as any).aistudio.openSelectKey();
-      onNotify({ id: Date.now().toString(), type: 'success', message: 'Cấu hình API Key thành công!' });
-    } catch (err) {
-      console.error(err);
-      onNotify({ id: Date.now().toString(), type: 'error', message: 'Không thể mở trình chọn API Key.' });
+  const [apiKeys, setApiKeys] = useState<{ name: string, key: string }[]>([]);
+  const [newKeyName, setNewKeyName] = useState('');
+  const [newKeyValue, setNewKeyValue] = useState('');
+
+  // Load saved API keys on mount
+  useEffect(() => {
+    const savedKeys = localStorage.getItem('gemini_api_keys');
+    if (savedKeys) {
+      try {
+        setApiKeys(JSON.parse(savedKeys));
+      } catch (e) {
+        console.error('Error loading API keys', e);
+      }
     }
+    // Backward compatibility: load single key
+    const singleKey = localStorage.getItem('gemini_api_key');
+    if (singleKey && !savedKeys) {
+      setApiKeys([{ name: 'Default', key: singleKey }]);
+    }
+  }, []);
+
+  const handleAddKey = () => {
+    if (!newKeyValue.trim()) {
+      onNotify({ id: Date.now().toString(), type: 'warning', message: 'Vui lòng nhập API Key.' });
+      return;
+    }
+    const name = newKeyName.trim() || `Key ${apiKeys.length + 1}`;
+    const newKeys = [...apiKeys, { name, key: newKeyValue.trim() }];
+    setApiKeys(newKeys);
+    setNewKeyName('');
+    setNewKeyValue('');
+    onNotify({ id: Date.now().toString(), type: 'success', message: `Đã thêm API Key "${name}"!` });
+  };
+
+  const handleRemoveKey = (index: number) => {
+    const newKeys = apiKeys.filter((_, i) => i !== index);
+    setApiKeys(newKeys);
+  };
+
+  const handleSaveConfig = () => {
+    localStorage.setItem('gemini_api_keys', JSON.stringify(apiKeys));
+    // Also save first key as default for backward compatibility
+    if (apiKeys.length > 0) {
+      localStorage.setItem('gemini_api_key', apiKeys[0].key);
+    } else {
+      localStorage.removeItem('gemini_api_key');
+    }
+    onNotify({ id: Date.now().toString(), type: 'success', message: 'Đã lưu cấu hình thành công!' });
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-8 animate-fade-in">
+    <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
       <div className="flex items-center gap-3">
         <i className="fas fa-user-gear text-blue-600 text-3xl"></i>
         <h1 className="text-2xl font-bold text-slate-800">Thiết lập hệ thống</h1>
       </div>
 
-      <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-100 space-y-8">
-        <div>
-          <label className="block text-sm font-bold text-slate-700 mb-3">Google Gemini API Key</label>
-          <div className="flex flex-col gap-4">
-            <p className="text-sm text-slate-600 leading-relaxed">
-              Ứng dụng yêu cầu API Key từ dự án Google Cloud có bật thanh toán để hoạt động. Vui lòng chọn một API Key hợp lệ thông qua hệ thống AI Studio.
-            </p>
-            <div className="flex flex-wrap gap-3">
-              <button
-                onClick={handleOpenKeySelector}
-                className="px-8 py-3 rounded-2xl gradient-primary text-white font-bold shadow-lg hover:brightness-110 active:scale-95 transition-all flex items-center gap-2"
-              >
-                <i className="fas fa-key"></i> Chọn hoặc Cập nhật API Key
-              </button>
-              <a
-                href="https://ai.google.dev/gemini-api/docs/billing"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-6 py-3 rounded-2xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 transition-all flex items-center gap-2"
-              >
-                <i className="fas fa-file-invoice-dollar"></i> Tài liệu Billing
-              </a>
-            </div>
-          </div>
-          <p className="mt-4 text-xs text-slate-400 flex items-center gap-2 italic">
-            <i className="fas fa-shield-halved"></i> Khóa API được bảo mật và không lưu trữ thủ công trong mã nguồn ứng dụng.
-          </p>
+      {/* Thêm API Key mới */}
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+        <h2 className="text-base font-bold text-blue-600 mb-4 flex items-center gap-2">
+          <i className="fas fa-plus"></i> Thêm API Key mới
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <input
+            type="text"
+            placeholder="Tên (tùy chọn)"
+            value={newKeyName}
+            onChange={(e) => setNewKeyName(e.target.value)}
+            className="px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50 text-slate-700"
+          />
+          <input
+            type="text"
+            placeholder="AIza..."
+            value={newKeyValue}
+            onChange={(e) => setNewKeyValue(e.target.value)}
+            className="px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50 text-slate-700 font-mono"
+          />
         </div>
+        <button
+          onClick={handleAddKey}
+          className="w-full py-3 rounded-xl gradient-primary text-white font-bold shadow-lg hover:brightness-110 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+        >
+          <i className="fas fa-plus"></i> Thêm key
+        </button>
+      </div>
 
-        <div className="pt-8 border-t border-slate-100">
-          <h2 className="text-lg font-bold text-slate-800 mb-6">Tham số chuẩn hóa (Default)</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-blue-200 transition-all">
-              <p className="text-xs font-bold text-slate-500 uppercase mb-2">Lề trái bắt buộc</p>
-              <div className="flex items-center gap-2">
-                <input type="number" defaultValue={30} className="bg-transparent font-bold text-blue-600 outline-none text-xl w-16" />
-                <span className="text-slate-400 font-bold">mm</span>
+      {/* Danh sách API Keys */}
+      {apiKeys.length > 0 && (
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+          <h2 className="text-base font-bold text-slate-700 mb-4">API Keys đã lưu</h2>
+          <div className="space-y-3">
+            {apiKeys.map((item, index) => (
+              <div key={index} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">
+                    <i className="fas fa-key text-sm"></i>
+                  </div>
+                  <div>
+                    <p className="font-bold text-slate-800 text-sm">{item.name}</p>
+                    <p className="text-xs text-slate-400 font-mono">{item.key.slice(0, 10)}...{item.key.slice(-4)}</p>
+                  </div>
+                  {index === 0 && (
+                    <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold">Đang dùng</span>
+                  )}
+                </div>
+                <button
+                  onClick={() => handleRemoveKey(index)}
+                  className="w-8 h-8 rounded-lg hover:bg-red-100 text-slate-400 hover:text-red-500 transition-all flex items-center justify-center"
+                >
+                  <i className="fas fa-trash text-sm"></i>
+                </button>
               </div>
-            </div>
-            <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-blue-200 transition-all">
-              <p className="text-xs font-bold text-slate-500 uppercase mb-2">Font chữ mặc định</p>
-              <select className="w-full bg-transparent font-bold text-blue-600 outline-none text-lg cursor-pointer">
-                <option>Times New Roman</option>
-                <option>Arial</option>
-                <option>Be Vietnam Pro</option>
-              </select>
-            </div>
+            ))}
           </div>
         </div>
+      )}
 
-        <div className="p-5 bg-blue-50 rounded-2xl border border-blue-100 flex items-start gap-4">
-          <i className="fas fa-info-circle text-blue-500 mt-1"></i>
+      {/* Thông tin Xoay vòng tự động */}
+      <div className="bg-amber-50 p-5 rounded-2xl border border-amber-200">
+        <div className="flex items-start gap-3">
+          <i className="fas fa-lightbulb text-amber-500 text-xl mt-0.5"></i>
           <div>
-            <p className="text-sm font-bold text-blue-900">Thông tin bổ sung</p>
-            <p className="text-xs text-blue-700 leading-relaxed">Đảm bảo tài khoản Google của bạn có đủ hạn ngạch (quota) để thực hiện các yêu cầu phân tích văn bản lớn.</p>
+            <p className="font-bold text-amber-800 mb-1">Xoay vòng tự động</p>
+            <p className="text-sm text-amber-700 leading-relaxed">
+              Khi gặp lỗi quota hoặc rate limit, hệ thống sẽ tự động chuyển sang key tiếp theo.
+              Thêm nhiều key để tránh gián đoạn khi sử dụng.
+            </p>
           </div>
         </div>
       </div>
+
+      {/* Hướng dẫn lấy API Key */}
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+        <h2 className="text-base font-bold text-slate-700 mb-4">Hướng dẫn lấy API Key:</h2>
+        <div className="space-y-3">
+          <a
+            href="https://aistudio.google.com/apikey"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-all text-slate-600 hover:text-blue-600"
+          >
+            <i className="fas fa-external-link-alt text-blue-500"></i>
+            <span className="font-medium">Lấy API Key tại Google AI Studio</span>
+          </a>
+          <a
+            href="https://www.youtube.com/results?search_query=get+gemini+api+key"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-all text-slate-600 hover:text-blue-600"
+          >
+            <i className="fas fa-external-link-alt text-blue-500"></i>
+            <span className="font-medium">Xem hướng dẫn chi tiết (Video)</span>
+          </a>
+        </div>
+      </div>
+
+      {/* Nút Lưu cấu hình */}
+      <button
+        onClick={handleSaveConfig}
+        className="w-full py-4 rounded-2xl gradient-primary text-white font-bold text-lg shadow-xl hover:brightness-110 active:scale-[0.98] transition-all"
+      >
+        Lưu cấu hình
+      </button>
     </div>
   );
 };
