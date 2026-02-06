@@ -286,7 +286,7 @@ const Standardize: React.FC<{ onNotify: (n: AppNotification) => void }> = ({ onN
           .trim();
       }
 
-      const preview = await gemini.generatePreviewHtml(analysis.standardizedContent || content);
+      const preview = await gemini.generatePreviewHtml(analysis.standardizedContent || content, docCategory);
 
       setResult(analysis);
       setPreviewHtml(preview);
